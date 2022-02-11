@@ -323,8 +323,8 @@ def kh_init(N, gamma=5/3, box_size=1):
     m, px, py, E = prim2cons(rho, vx, vy, p, gamma, dx**2)
     return m, px, py, E, dx, gamma
 
-def init(N, gamma=5/3, box_size=1):
-    """ Create initial conditions """
+def checker(N, gamma=5/3, box_size=1):
+    """ Checker pattern initial condition """
     dx = box_size/N
     x = np.linspace(dx/2, box_size-dx/2, N)
     Y, X = np.meshgrid(x, x)
@@ -337,13 +337,35 @@ def init(N, gamma=5/3, box_size=1):
     m, px, py, E = prim2cons(rho, vx, vy, p, gamma, dx**2)
     return m, px, py, E, dx, gamma
 
+def circle(N, gamma=5/3, box_size=1):
+    """ circular initial conditions """
+    dx = box_size/N
+    x = np.linspace(dx/2, box_size-dx/2, N)
+    Y, X = np.meshgrid(x, x)
+    center_x = center_y = box_size/2
+    R = np.sqrt((X-center_x)**2+(Y-center_y)**2)
+    rho = 2*(0.4*box_size)/np.sqrt(R) # circular config, densest at center
+    v_tang_x = -3*(Y-center_y)*R # CCW tangential motion
+    v_tang_y = 3*(X-center_x)*R
+    v_rad_x = 0.5*(X-center_x)*(1-0.5*box_size/R) # infalling velocity
+    v_rad_y = 0.5*(Y-center_y)*(1-0.5*box_size/R)
+    # add stochastic components to v
+    vx = v_tang_x + v_rad_x + np.random.normal(loc=0, scale=0.5, size=(N,N))
+    vy = v_tang_y + v_rad_y + np.random.normal(loc=0, scale=0.5, size=(N,N))
+    p = 1*rho # isothermal p~rho
+    m, px, py, E = prim2cons(rho, vx, vy, p, gamma, dx**2)
+    return m, px, py, E, dx, gamma
+
 def animate(i):
     plt.cla()
     plt.imshow(frames[i], cmap='turbo')
+    ax = plt.gca()
+    ax.invert_yaxis()
 
 if __name__== "__main__":
     #frames = main(*kh_init(128))
-    frames = main(*init(128))
+    #frames = main(*checker(128))
+    frames = main(*circle(128))
     fig = plt.figure(figsize=(4,4), dpi=100)
     anim = animation.FuncAnimation(fig, animate, len(frames), interval=1, blit=False)
     Writer = animation.writers['ffmpeg']
