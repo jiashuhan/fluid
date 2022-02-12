@@ -142,7 +142,7 @@ def rusanov_flux(rhoL, rhoR, vxL, vxR, vyL, vyR, pL, pR, gamma):
     pyL = rhoL*vyL
     pyR = rhoR*vyR
     
-    FmL = pxL
+    FmL = pxL # from the Euler equations for compressible fluid
     FmR = pxR
     FpxL = pxL**2/rhoL + pL
     FpxR = pxR**2/rhoR + pR
@@ -204,7 +204,7 @@ def update_cells(f, Fx, Fy, dx, dt):
     f += dt*dx*np.roll(Fy,1,axis=1)
     return f
 
-def main(m, px, py, E, dx, gamma, duration=2):
+def main(m, px, py, E, dx, gamma, duration=2, slope_limit=False):
     """
     Main loop of simulation
 
@@ -247,6 +247,12 @@ def main(m, px, py, E, dx, gamma, duration=2):
         vy_dx, vy_dy = gradient(vy, dx)
         p_dx, p_dy = gradient(p, dx)
 
+        if slope_limit:
+            rho_dx, rho_dy = slope_limiter(rho, rho_dx, rho_dy, dx)
+            vx_dx, vx_dy = slope_limiter(vx, vx_dx, vx_dy, dx)
+            vy_dx, vy_dy = slope_limiter(vy, vy_dx, vy_dy, dx)
+            p_dx, p_dy = slope_limiter(p, p_dx, p_dy, dx)
+
         # move half a time step forward for spatial extrapolations and flux calculations
         rho1 = rho - dt*(vx*rho_dx+vy*rho_dy+rho*(vx_dx+vy_dy))/2 
         vx1 = vx - dt*(vx*vx_dx+vy*vx_dy+p_dx/rho)/2
@@ -286,6 +292,43 @@ def main(m, px, py, E, dx, gamma, duration=2):
     plt.savefig('./results/final_state.png', dpi=240)
     plt.show()
     return frames
+
+def slope_limiter(f, f_dx, f_dy, dx):
+    """
+    Limit gradient values to remove numerical artifacts introduced
+    by shocks (discontinuities in the fluid variables)
+
+    Parameters
+    ----------
+    f, f_dx, f_dy: array_like, float
+        the field of fluid variable and its gradients
+
+    dx: float
+        cell size
+
+    Returns
+    -------
+    f_dx, f_dy: array_like, float
+        slope-limited gradients
+
+    Note
+    ----
+    Enabling slope limiting allows faster initial velocities
+    """
+    # calculate L/R gradients
+    left_f_dx = (f-np.roll(f,1,axis=0))/dx
+    right_f_dx = (np.roll(f,-1,axis=0)-f)/dx
+    left_f_dy = (f-np.roll(f,1,axis=1))/dx
+    right_f_dy = (np.roll(f,-1,axis=1)-f)/dx
+
+    # rescale gradient to L/R gradient if the latter is smaller with same sign
+    # if signs differ (i.e. discontinuity), set gradient to 0; otherwise no change
+    # small quantity added to prevent divide by zero error
+    f_dx *= np.maximum(0, np.minimum(1, left_f_dx/(f_dx+1e-8*(f_dx==0))))
+    f_dx *= np.maximum(0, np.minimum(1, right_f_dx/(f_dx+1e-8*(f_dx==0))))
+    f_dy *= np.maximum(0, np.minimum(1, left_f_dy/(f_dy+1e-8*(f_dy==0))))
+    f_dy *= np.maximum(0, np.minimum(1, right_f_dy/(f_dy+1e-8*(f_dy==0))))
+    return f_dx, f_dy
 
 def kh_init(N, gamma=5/3, box_size=1):
     """
@@ -345,10 +388,12 @@ def circle(N, gamma=5/3, box_size=1):
     center_x = center_y = box_size/2
     R = np.sqrt((X-center_x)**2+(Y-center_y)**2)
     rho = 2*(0.4*box_size)/np.sqrt(R) # circular config, densest at center
-    v_tang_x = -3*(Y-center_y)*R # CCW tangential motion
-    v_tang_y = 3*(X-center_x)*R
-    v_rad_x = 0.5*(X-center_x)*(1-0.5*box_size/R) # infalling velocity
-    v_rad_y = 0.5*(Y-center_y)*(1-0.5*box_size/R)
+    vt0 = 3 # up to ~8 with slope limiting; up to ~4 without
+    vr0 = 0.5
+    v_tang_x = -vt0*(Y-center_y)*R # CCW tangential motion
+    v_tang_y = vt0*(X-center_x)*R
+    v_rad_x = vr0*(X-center_x)*(1-0.5*box_size/R) # infalling velocity
+    v_rad_y = vr0*(Y-center_y)*(1-0.5*box_size/R)
     # add stochastic components to v
     vx = v_tang_x + v_rad_x + np.random.normal(loc=0, scale=0.5, size=(N,N))
     vy = v_tang_y + v_rad_y + np.random.normal(loc=0, scale=0.5, size=(N,N))
@@ -365,10 +410,11 @@ def animate(i):
 if __name__== "__main__":
     #frames = main(*kh_init(128))
     #frames = main(*checker(128))
-    frames = main(*circle(128))
-    fig = plt.figure(figsize=(4,4), dpi=100)
-    anim = animation.FuncAnimation(fig, animate, len(frames), interval=1, blit=False)
-    Writer = animation.writers['ffmpeg']
-    writer = Writer(fps=100)
-    anim.save('./results/fluid.mp4', writer=writer)
-    plt.show()
+    frames = main(*circle(128), slope_limit=False)
+    if len(sys.argv) > 1 and int(sys.argv[1]) == 1:
+        fig = plt.figure(figsize=(4,4), dpi=100)
+        anim = animation.FuncAnimation(fig, animate, len(frames), interval=1, blit=False)
+        Writer = animation.writers['ffmpeg']
+        writer = Writer(fps=100)
+        anim.save('./results/fluid.mp4', writer=writer)
+        plt.show()
